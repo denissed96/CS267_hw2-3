@@ -27,6 +27,7 @@ endif ()
 
 add_executable(gpu main.cu gpu.cu common.h)
 target_compile_features(gpu PRIVATE cxx_std_11)
+set( CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}" "--arch=sm_60" )
 
 # Copy the job scripts
 configure_file(job-gpu job-gpu COPYONLY)

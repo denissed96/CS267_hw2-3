@@ -3,6 +3,6 @@
 #SBATCH -n 1
 #SBATCH -p GPU-shared
 #SBATCH -t 00:30:00
-#SBATCH --gres=gpu:p100:1
+#SBATCH --gres=gpu:1
 
 ./gpu

@@ -5,6 +5,8 @@
 
 // Put any static global variables here that you will use throughout the simulation.
 int blks;
+__device__ int* part_id;
+__device__ int* bin_id;
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
@@ -77,6 +79,8 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // parts live in GPU memory
     // Rewrite this function
+    int Nbin = (int)sqrt(num_parts);
+    double bin_size = size / Nbin;
 
     // Compute forces
     compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts);

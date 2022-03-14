@@ -5,4 +5,4 @@
 #SBATCH -t 00:30:00
 #SBATCH --gres=gpu:1
 
-./gpu
+./gpu -s 1 -n 1000

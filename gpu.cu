@@ -3,16 +3,15 @@
 #include <cuda.h>
 #include <iostream>
 #include <stdio.h>
+#include <thrust/scan.h>
 
 #define NUM_THREADS 256
 
 // Put any static global variables here that you will use throughout the simulation.
 int blks;
 int* part_id;
-int* bin_id;
 int* bin_cnt;
 int* part_id_gpu;
-int* bin_id_gpu;
 int* bin_cnt_gpu;
 int Nbin;
 double bin_size;
@@ -119,6 +118,14 @@ __device__ int get_bin_idx(particle_t const& particle, int Nbin, double bin_size
     return idx;
 }
 
+__global__ void init_bin_cnt(int* bin_cnt, int Nbin) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= Nbin * Nbin)
+        return;
+    bin_cnt[tid] = 0;
+}
+
+// get #parts in each bin
 __global__ void fill_bin_cnt(particle_t const* parts, int* bin_cnt, int num_parts, int Nbin,
                              double bin_size) {
     // Get thread (particle) ID
@@ -128,14 +135,17 @@ __global__ void fill_bin_cnt(particle_t const* parts, int* bin_cnt, int num_part
     int idx = get_bin_idx(parts[tid], Nbin, bin_size);
     printf("Particle %d is in bin %d\n", tid, idx);
     atomicAdd(&bin_cnt[idx], 1);
-    //    printf("bin count at %d = %d\n", idx, bin_cnt[idx]);
 }
 
-__global__ void init_bin_cnt(int* bin_cnt, int Nbin) {
+__global__ void fill_part_id(particle_t const* parts, int* bin_cnt, int* part_id, int num_parts,
+                             int Nbin, double bin_size) {
+    // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= Nbin * Nbin)
+    if (tid >= num_parts)
         return;
-    bin_cnt[tid] = 0;
+    int idx = get_bin_idx(parts[tid], Nbin, bin_size);
+    int old = atomicAdd(&bin_cnt[idx], 1);
+    part_id[old] = tid;
 }
 
 void init_simulation(particle_t* parts, int num_parts, double size) {
@@ -148,32 +158,47 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     bin_size = size / Nbin;
 
     // init array
+    // on CPU
     part_id = new int[num_parts];
-    bin_id = new int[Nbin * Nbin];
-    //    std::fill_n(bin_id, Nbin * Nbin, Nbin * Nbin);
     bin_cnt = new int[Nbin * Nbin]{0};
-
+    // on GPU
     cudaMalloc((void**)&bin_cnt_gpu, Nbin * Nbin * sizeof(int));
     cudaMalloc((void**)&part_id_gpu, num_parts * sizeof(int));
-    cudaMalloc((void**)&bin_id_gpu, Nbin * Nbin * sizeof(int));
 
+    // init bin_cnt_gpu to be array of 0s
     init_bin_cnt<<<blks, NUM_THREADS>>>(bin_cnt_gpu, Nbin);
     cudaDeviceSynchronize();
-    //    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
-
-    //    print_part<<<blks, NUM_THREADS>>>(parts, num_parts);
-    //    cudaDeviceSynchronize();
 
     // get #parts in each bin
     fill_bin_cnt<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, num_parts, Nbin, bin_size);
-    //    get_bin_idx<<<blks, NUM_THREADS>>>(parts, num_parts, size);
     cudaDeviceSynchronize();
 
+    // copy bin_cnt_gpu to CPU
     cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
-    for (int i = 0; i < Nbin * Nbin; ++i) {
-        std::cout << bin_cnt[i] << " ";
+    // get the exclusive prefix sum. Must on CPU and in-place
+    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
+    // copy bin_cnt to GPU
+    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
+
+    // get part_id_gpu
+    fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, part_id_gpu, num_parts, Nbin, bin_size);
+    cudaDeviceSynchronize();
+    // copy bin_cnt to GPU again since the data on GPU are modified
+    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
+
+    cudaMemcpy(part_id, part_id_gpu, num_parts * sizeof(int), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < num_parts; ++i) {
+        std::cout << part_id[i] << " ";
     }
     std::cout << std::endl;
+
+    //    for (int i = 0; i < Nbin * Nbin; ++i) {
+    //        std::cout << bin_cnt[i] << " ";
+    //    }
+    //    std::cout << std::endl;
+
+    //    print_part<<<blks, NUM_THREADS>>>(parts, num_parts);
+    //    cudaDeviceSynchronize();
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {

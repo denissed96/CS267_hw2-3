@@ -9,7 +9,7 @@
 
 // Put any static global variables here that you will use throughout the simulation.
 int blks;
-int* bin_cnt;
+// int* bin_cnt;
 int* bin_cnt_gpu;
 int* bin_id_gpu;
 int* bin_id_cp_gpu;
@@ -95,7 +95,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 
     // init array
     // on CPU
-    bin_cnt = new int[Nbin * Nbin]{0};
+    //    bin_cnt = new int[Nbin * Nbin]{0};
     // on GPU
     cudaMalloc((void**)&bin_cnt_gpu, Nbin * Nbin * sizeof(int));
     cudaMalloc((void**)&bin_id_gpu, Nbin * Nbin * sizeof(int));
@@ -110,12 +110,15 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     fill_bin_cnt<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, num_parts, Nbin, bin_size);
     cudaDeviceSynchronize();
 
-    // copy bin_cnt_gpu to CPU
-    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
+    // copy bin_cnt_gpu to bin_id_gpu
+    sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_cnt_gpu, bin_id_gpu, Nbin);
+    //    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
     // get the exclusive prefix sum. Must on CPU and in-place
-    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
+
+    thrust::exclusive_scan(thrust::device, bin_id_gpu, bin_id_gpu + Nbin * Nbin,
+                           bin_id_gpu); // in-place scan
     // copy bin_cnt to GPU
-    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
+    //    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
 
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
     cudaDeviceSynchronize();
@@ -276,15 +279,23 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     cudaDeviceSynchronize();
 
     // rebinning all particles
-    // copy bin_cnt_gpu to CPU
-    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
-    // get the exclusive prefix sum. Must on CPU and in-place
-    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
-    // copy bin_cnt to GPU
-    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
-
+    // copy bin_cnt_gpu to bin_id_gpu
+    sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_cnt_gpu, bin_id_gpu, Nbin);
+    thrust::exclusive_scan(thrust::device, bin_id_gpu, bin_id_gpu + Nbin * Nbin,
+                           bin_id_gpu); // in-place scan
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
     cudaDeviceSynchronize();
+
+    //    // copy bin_cnt_gpu to CPU
+    //    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
+    //    // get the exclusive prefix sum. Must on CPU and in-place
+    //    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
+    //    // copy bin_cnt to GPU
+    //    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
+    //
+    //    sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
+    //    cudaDeviceSynchronize();
+
     // get part_id_gpu
     fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_id_cp_gpu, part_id_gpu, num_parts, Nbin,
                                         bin_size);

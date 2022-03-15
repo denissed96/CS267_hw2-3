@@ -217,11 +217,11 @@ __global__ void compute_forces_gpu(particle_t* parts, int* part_id, int* bin_cnt
     int neigh_cnt = get_neigh_cnt(bin_cnt, bin_idx, Nbin, num_parts);
     int* neigh = get_neigh(part_id, bin_cnt, neigh_cnt, bin_idx, Nbin, num_parts);
 
-    //    for (int j = 0; j < neigh_cnt; j++)
-    //        apply_force_gpu(parts[tid], parts[neigh[j]]);
+    for (int j = 0; j < neigh_cnt; j++)
+        apply_force_gpu(parts[tid], parts[neigh[j]]);
 
-    for (int j = 0; j < num_parts; j++)
-        apply_force_gpu(parts[tid], parts[j]);
+    //    for (int j = 0; j < num_parts; j++)
+//        apply_force_gpu(parts[tid], parts[j]);
 
     delete[] neigh;
 }

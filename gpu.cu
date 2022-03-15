@@ -9,7 +9,6 @@
 
 // Put any static global variables here that you will use throughout the simulation.
 int blks;
-// int* bin_cnt;
 int* bin_cnt_gpu;
 int* bin_id_gpu;
 int* bin_id_cp_gpu;
@@ -193,6 +192,27 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
+__device__ void compute_force_neigh(particle_t* parts, particle_t& p, int* part_id, int* bin_id,
+                                    int idx, int Nbin, int num_parts) {
+    int row = idx / Nbin;
+    int col = idx % Nbin;
+    int row_start = (row - 1 >= 0) ? row - 1 : 0;
+    int row_end = (row + 1 < Nbin) ? row + 1 : Nbin - 1;
+    int col_start = (col - 1 >= 0) ? col - 1 : 0;
+    int col_end = (col + 1 < Nbin) ? col + 1 : Nbin - 1;
+
+    for (int i = row_start; i <= row_end; ++i) {
+        for (int j = col_start; j <= col_end; ++j) {
+            int bin_idx = i * Nbin + j;
+            int end = (bin_idx == Nbin * Nbin - 1) ? num_parts : bin_id[bin_idx + 1];
+            for (int k = bin_id[bin_idx]; k < end; ++k) {
+                int neigh_id = part_id[k];
+                apply_force_gpu(p, parts[neigh_id]);
+            }
+        }
+    }
+}
+
 __global__ void compute_forces_gpu(particle_t* parts, int* part_id, int* bin_cnt, int* bin_id,
                                    int num_parts, int Nbin, double bin_size) {
     // Get thread (particle) ID
@@ -203,14 +223,8 @@ __global__ void compute_forces_gpu(particle_t* parts, int* part_id, int* bin_cnt
     parts[tid].ax = parts[tid].ay = 0;
     // get bin idx for the particle
     int idx = get_bin_idx(parts[tid], Nbin, bin_size);
-    // get the neighbor part ids
-    int neigh_cnt = get_neigh_cnt(bin_cnt, idx, Nbin, num_parts);
-    int* neigh = get_neigh(part_id, bin_id, neigh_cnt, idx, Nbin, num_parts);
-
-    for (int j = 0; j < neigh_cnt; j++)
-        apply_force_gpu(parts[tid], parts[neigh[j]]);
-
-    delete[] neigh;
+    // compute forces from neighboring parts
+    compute_force_neigh(parts, parts[tid], part_id, bin_id, idx, Nbin, num_parts);
 }
 
 __global__ void move_gpu(particle_t* particles, int* bin_cnt, int num_parts, int Nbin,

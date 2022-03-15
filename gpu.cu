@@ -147,6 +147,8 @@ __device__ int get_neigh_cnt(int* bin_cnt, int idx, int Nbin, int num_parts) {
     int row_end = (row + 1 < Nbin) ? row + 1 : Nbin - 1;
     int col_start = (col - 1 >= 0) ? col - 1 : 0;
     int col_end = (col + 1 < Nbin) ? col + 1 : Nbin - 1;
+
+    // get the total number of neighbor parts
     int tot_neigh_cnt = 0;
     for (int i = row_start; i <= row_end; ++i) {
         for (int j = col_start; j <= col_end; ++j) {
@@ -156,6 +158,31 @@ __device__ int get_neigh_cnt(int* bin_cnt, int idx, int Nbin, int num_parts) {
         }
     }
     return tot_neigh_cnt;
+}
+
+__device__ int* get_neigh(int* part_id, int* bin_cnt, int neigh_cnt, int idx, int Nbin,
+                          int num_parts) {
+    int row = idx / Nbin;
+    int col = idx % Nbin;
+    int row_start = (row - 1 >= 0) ? row - 1 : 0;
+    int row_end = (row + 1 < Nbin) ? row + 1 : Nbin - 1;
+    int col_start = (col - 1 >= 0) ? col - 1 : 0;
+    int col_end = (col + 1 < Nbin) ? col + 1 : Nbin - 1;
+
+    // get the neighbor part ids
+    int* neigh = new int[neigh_cnt];
+    int cnt = 0;
+    for (int i = row_start; i <= row_end; ++i) {
+        for (int j = col_start; j <= col_end; ++j) {
+            int bin_idx = i * Nbin + j;
+            int end = (bin_idx == Nbin * Nbin - 1) ? num_parts : bin_cnt[bin_idx + 1];
+            for (int k = bin_cnt[bin_idx]; k < end; ++k) {
+                neigh[cnt] = part_id[k];
+                cnt++;
+            }
+        }
+    }
+    return neigh;
 }
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
@@ -176,8 +203,8 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
-__global__ void compute_forces_gpu(particle_t* parts, int* bin_cnt, int num_parts, int Nbin,
-                                   double bin_size) {
+__global__ void compute_forces_gpu(particle_t* parts, int* part_id, int* bin_cnt, int num_parts,
+                                   int Nbin, double bin_size) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -186,10 +213,12 @@ __global__ void compute_forces_gpu(particle_t* parts, int* bin_cnt, int num_part
     parts[tid].ax = parts[tid].ay = 0;
     // get bin idx for the particle
     int bin_idx = get_bin_idx(parts[tid], Nbin, bin_size);
-    // get the number of neighbor parts
+    // get the neighbor part ids
     int neigh_cnt = get_neigh_cnt(bin_cnt, bin_idx, Nbin, num_parts);
+    int* neigh = get_neigh(part_id, bin_cnt, neigh_cnt, bin_idx, Nbin, num_parts);
 
-    int* neigh = new int[neigh_cnt];
+    //    for (int j = 0; j < neigh_cnt; j++)
+    //        apply_force_gpu(parts[tid], parts[neigh[j]]);
 
     for (int j = 0; j < num_parts; j++)
         apply_force_gpu(parts[tid], parts[j]);
@@ -232,8 +261,31 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Rewrite this function
 
     // Compute forces
-    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, num_parts, Nbin, bin_size);
+    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, part_id_gpu, bin_cnt_gpu, num_parts, Nbin,
+                                              bin_size);
 
     // Move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, size);
+
+    // rebinning all particles
+    // init bin_cnt_gpu to be array of 0s
+    init_bin_cnt<<<blks, NUM_THREADS>>>(bin_cnt_gpu, Nbin);
+    cudaDeviceSynchronize();
+
+    // get #parts in each bin
+    fill_bin_cnt<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, num_parts, Nbin, bin_size);
+    cudaDeviceSynchronize();
+
+    // copy bin_cnt_gpu to CPU
+    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
+    // get the exclusive prefix sum. Must on CPU and in-place
+    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
+    // copy bin_cnt to GPU
+    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
+
+    // get part_id_gpu
+    fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, part_id_gpu, num_parts, Nbin, bin_size);
+    cudaDeviceSynchronize();
+    // copy bin_cnt to GPU again since the data on GPU are modified
+    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
 }

@@ -142,10 +142,10 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
-__device__ void compute_force_neigh(particle_t* parts, particle_t* p, int* part_id, int* bin_id,
+__device__ void compute_force_neigh(particle_t* parts, particle_t& p, int* part_id, int* bin_id,
                                     int Nbin, int num_parts, double bin_size) {
     // get bin idx for the particle
-    int idx = get_bin_idx(*p, Nbin, bin_size);
+    int idx = get_bin_idx(p, Nbin, bin_size);
     int row = idx / Nbin;
     int col = idx % Nbin;
     int row_start = (row - 1 >= 0) ? row - 1 : 0;
@@ -159,7 +159,7 @@ __device__ void compute_force_neigh(particle_t* parts, particle_t* p, int* part_
             int end = (bin_idx == Nbin * Nbin - 1) ? num_parts : bin_id[bin_idx + 1];
             for (int k = bin_id[bin_idx]; k < end; ++k) {
                 int neigh_id = part_id[k];
-                apply_force_gpu(*p, parts[neigh_id]);
+                apply_force_gpu(p, parts[neigh_id]);
             }
         }
     }
@@ -175,7 +175,7 @@ __global__ void compute_forces_gpu(particle_t* parts, int* part_id, int* bin_cnt
     parts[tid].ax = parts[tid].ay = 0;
 
     // compute forces from neighboring parts
-    compute_force_neigh(parts, &parts[tid], part_id, bin_id, Nbin, num_parts, bin_size);
+    compute_force_neigh(parts, parts[tid], part_id, bin_id, Nbin, num_parts, bin_size);
 }
 
 __global__ void move_gpu(particle_t* particles, int* bin_cnt, int num_parts, int Nbin,

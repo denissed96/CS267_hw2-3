@@ -226,6 +226,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Compute forces
     compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, part_id_gpu, bin_cnt_gpu, bin_id_gpu,
                                               num_parts, Nbin, bin_size);
+    cudaDeviceSynchronize();
 
     // Move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, bin_cnt_gpu, num_parts, Nbin, bin_size, size);
@@ -234,6 +235,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // rebinning all particles
     // copy bin_cnt_gpu to bin_id_gpu
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_cnt_gpu, bin_id_gpu, Nbin);
+    cudaDeviceSynchronize();
     thrust::exclusive_scan(thrust::device, bin_id_gpu, bin_id_gpu + Nbin * Nbin,
                            bin_id_gpu); // in-place scan
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
@@ -242,5 +244,4 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // get part_id_gpu
     fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_id_cp_gpu, part_id_gpu, num_parts, Nbin,
                                         bin_size);
-    cudaDeviceSynchronize();
 }

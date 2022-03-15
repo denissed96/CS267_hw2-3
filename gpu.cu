@@ -93,10 +93,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     Nbin = (int)sqrt(num_parts);
     bin_size = size / Nbin;
 
-    // init array
-    // on CPU
-    //    bin_cnt = new int[Nbin * Nbin]{0};
-    // on GPU
+    // init array on GPU
     cudaMalloc((void**)&bin_cnt_gpu, Nbin * Nbin * sizeof(int));
     cudaMalloc((void**)&bin_id_gpu, Nbin * Nbin * sizeof(int));
     cudaMalloc((void**)&bin_id_cp_gpu, Nbin * Nbin * sizeof(int));
@@ -112,27 +109,17 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 
     // copy bin_cnt_gpu to bin_id_gpu
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_cnt_gpu, bin_id_gpu, Nbin);
-    //    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
-    // get the exclusive prefix sum. Must on CPU and in-place
-
+    // get the exclusive prefix sum on GPU. Must in-place
     thrust::exclusive_scan(thrust::device, bin_id_gpu, bin_id_gpu + Nbin * Nbin,
                            bin_id_gpu); // in-place scan
-    // copy bin_cnt to GPU
-    //    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
 
+    // copy bin_id_gpu to bin_id_cp_gpu
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
     cudaDeviceSynchronize();
     // get part_id_gpu
     fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_id_cp_gpu, part_id_gpu, num_parts, Nbin,
                                         bin_size);
     cudaDeviceSynchronize();
-    //    // copy bin_cnt to GPU again since the data on GPU are modified
-    //    cudaMemcpy(bin_cnt_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
-
-    //    int* part_id = new int[num_parts];
-    //    cudaMemcpy(part_id, part_id_gpu, num_parts * sizeof(int), cudaMemcpyDeviceToHost);
-    //    print_bins(part_id, bin_cnt, Nbin, num_parts);
-    //    delete[] part_id;
 
     //    print_part<<<blks, NUM_THREADS>>>(parts, num_parts);
     //    cudaDeviceSynchronize();
@@ -258,6 +245,7 @@ __global__ void move_gpu(particle_t* particles, int* bin_cnt, int num_parts, int
         p->vy = -(p->vy);
     }
 
+    // get the new bin idx after moving p
     int idx_new = get_bin_idx(*p, Nbin, bin_size);
 
     if (idx_old != idx_new) {
@@ -285,16 +273,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                            bin_id_gpu); // in-place scan
     sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
     cudaDeviceSynchronize();
-
-    //    // copy bin_cnt_gpu to CPU
-    //    cudaMemcpy(bin_cnt, bin_cnt_gpu, Nbin * Nbin * sizeof(int), cudaMemcpyDeviceToHost);
-    //    // get the exclusive prefix sum. Must on CPU and in-place
-    //    thrust::exclusive_scan(bin_cnt, bin_cnt + Nbin * Nbin, bin_cnt); // in-place scan
-    //    // copy bin_cnt to GPU
-    //    cudaMemcpy(bin_id_gpu, bin_cnt, Nbin * Nbin * sizeof(int), cudaMemcpyHostToDevice);
-    //
-    //    sync_src_to_cp<<<blks, NUM_THREADS>>>(bin_id_gpu, bin_id_cp_gpu, Nbin);
-    //    cudaDeviceSynchronize();
 
     // get part_id_gpu
     fill_part_id<<<blks, NUM_THREADS>>>(parts, bin_id_cp_gpu, part_id_gpu, num_parts, Nbin,

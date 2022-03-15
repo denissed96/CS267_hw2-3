@@ -124,56 +124,6 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     //    cudaDeviceSynchronize();
 }
 
-__device__ bool check_cutoff_boundary(particle_t& particle, double bin_xx, double bin_yy,
-                                      double bin_size) {
-    return (particle.x - bin_xx > cutoff) && (bin_xx + bin_size - particle.x > cutoff) &&
-           (particle.y - bin_yy > cutoff) && (bin_yy + bin_size - particle.y > cutoff);
-}
-
-__device__ int get_neigh_cnt(int* bin_cnt, int idx, int Nbin, int num_parts) {
-    int row = idx / Nbin;
-    int col = idx % Nbin;
-    int row_start = (row - 1 >= 0) ? row - 1 : 0;
-    int row_end = (row + 1 < Nbin) ? row + 1 : Nbin - 1;
-    int col_start = (col - 1 >= 0) ? col - 1 : 0;
-    int col_end = (col + 1 < Nbin) ? col + 1 : Nbin - 1;
-
-    // get the total number of neighbor parts
-    int tot_neigh_cnt = 0;
-    for (int i = row_start; i <= row_end; ++i) {
-        for (int j = col_start; j <= col_end; ++j) {
-            int bin_idx = i * Nbin + j;
-            tot_neigh_cnt += bin_cnt[bin_idx];
-        }
-    }
-    return tot_neigh_cnt;
-}
-
-__device__ int* get_neigh(int* part_id, int* bin_id, int neigh_cnt, int idx, int Nbin,
-                          int num_parts) {
-    int row = idx / Nbin;
-    int col = idx % Nbin;
-    int row_start = (row - 1 >= 0) ? row - 1 : 0;
-    int row_end = (row + 1 < Nbin) ? row + 1 : Nbin - 1;
-    int col_start = (col - 1 >= 0) ? col - 1 : 0;
-    int col_end = (col + 1 < Nbin) ? col + 1 : Nbin - 1;
-
-    // get the neighbor part ids
-    int* neigh = new int[neigh_cnt];
-    int cnt = 0;
-    for (int i = row_start; i <= row_end; ++i) {
-        for (int j = col_start; j <= col_end; ++j) {
-            int bin_idx = i * Nbin + j;
-            int end = (bin_idx == Nbin * Nbin - 1) ? num_parts : bin_id[bin_idx + 1];
-            for (int k = bin_id[bin_idx]; k < end; ++k) {
-                neigh[cnt] = part_id[k];
-                cnt++;
-            }
-        }
-    }
-    return neigh;
-}
-
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
